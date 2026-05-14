@@ -1,0 +1,8 @@
+[
+  {"id": 1, "name": "DevopShift Laptop Pro", "price": 1499, "category": "laptops"},
+  {"id": 2, "name": "DevopShift Laptop Air", "price": 999, "category": "laptops"},
+  {"id": 3, "name": "DevopShift Phone X", "price": 899, "category": "phones"},
+  {"id": 4, "name": "DevopShift Phone Mini", "price": 599, "category": "phones"},
+  {"id": 5, "name": "DevopShift Headphones Pro", "price": 299, "category": "headphones"},
+  {"id": 6, "name": "DevopShift Earbuds", "price": 149, "category": "headphones"}
+]
