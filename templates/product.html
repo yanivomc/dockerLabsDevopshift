@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import product_icon %}
+{% block title %}{{ product.name }} — DevopShift Store{% endblock %}
+
+{% block content %}
+<nav class="text-xs text-slate-500 mb-6">
+  <a href="/" class="hover:text-cyan-400 transition">← Back to store</a>
+</nav>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-10">
+  <div class="rounded-xl border border-slate-700 overflow-hidden">
+    <div class="h-96 flex items-center justify-center {% if product.category == 'laptops' %}bg-gradient-to-br from-cyan-500 to-blue-700{% elif product.category == 'phones' %}bg-gradient-to-br from-fuchsia-500 to-purple-700{% else %}bg-gradient-to-br from-amber-500 to-rose-600{% endif %}">
+      <div class="scale-[2.5]">{{ product_icon(product.category) }}</div>
+    </div>
+  </div>
+
+  <div>
+    <p class="text-xs uppercase tracking-wide text-slate-400">{{ product.category }}</p>
+    <h2 class="text-3xl font-semibold mt-1">{{ product.name }}</h2>
+    <p class="text-slate-400 mt-2">{{ product.tagline }}</p>
+    <p class="text-3xl text-cyan-400 font-semibold mt-6">${{ product.price }}</p>
+    <p class="text-sm text-slate-300 mt-6 leading-relaxed">{{ product.description }}</p>
+
+    <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400 mt-8 mb-3">Specs</h3>
+    <dl class="text-sm divide-y divide-slate-800 border-y border-slate-800">
+      {% for k, v in product.specs.items() %}
+      <div class="py-2.5 flex justify-between gap-4">
+        <dt class="text-slate-400">{{ k }}</dt>
+        <dd class="text-slate-200 text-right">{{ v }}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+
+    <button disabled
+            title="Cart arrives in Topic 5 — needs a database"
+            class="mt-8 px-5 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-500 text-sm font-medium cursor-not-allowed">
+      Add to cart · unlocks in Topic 5
+    </button>
+
+    <p class="text-xs text-slate-500 mt-3">
+      Want the JSON?
+      <a href="/products/{{ product.id }}" class="text-cyan-400 hover:underline">/products/{{ product.id }}</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

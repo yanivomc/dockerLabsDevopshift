@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Architecture — DevopShift Store{% endblock %}
+
+{% block content %}
+<h2 class="text-xl font-semibold">Architecture evolution</h2>
+<p class="text-sm text-slate-500 mt-1 mb-10">
+  This app grows one topic at a time. The pulsing dot marks where you are now.
+</p>
+
+<ol class="relative border-l-2 border-slate-800 ml-3 space-y-8">
+  {% for stage in stages %}
+  {% set is_current = stage.topic == current_topic %}
+  <li class="ml-6">
+    <span class="absolute -left-[9px] flex items-center justify-center w-4 h-4 rounded-full
+      {% if is_current %}bg-cyan-400 ring-4 ring-cyan-500/20 animate-pulse{% else %}bg-slate-700{% endif %}"></span>
+    <div class="border rounded-xl p-5
+      {% if is_current %}border-cyan-500/50 bg-cyan-500/5{% else %}border-slate-800 bg-slate-900/50{% endif %}">
+      <div class="flex items-baseline justify-between gap-4">
+        <h3 class="text-lg font-semibold">
+          <span class="text-slate-500 text-xs uppercase tracking-wide">Topic {{ stage.topic }}</span>
+          <span class="ml-2">{{ stage.title }}</span>
+          {% if is_current %}<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">You are here</span>{% endif %}
+        </h3>
+        <span class="text-xs text-slate-500 whitespace-nowrap">{{ stage.tagline }}</span>
+      </div>
+      <p class="text-sm text-slate-400 mt-2">{{ stage.summary }}</p>
+      <div class="flex flex-wrap gap-2 mt-4 items-center">
+        {% for c in stage.components %}
+        <span class="inline-flex items-center text-xs px-2.5 py-1 rounded-md border
+          {% if c.kind == 'client' %}border-slate-700 text-slate-300 bg-slate-800/50
+          {% elif c.kind == 'app' %}border-cyan-500/40 text-cyan-200 bg-cyan-500/10
+          {% elif c.kind == 'storage' %}border-emerald-500/40 text-emerald-200 bg-emerald-500/10
+          {% elif c.kind == 'cache' %}border-rose-500/40 text-rose-200 bg-rose-500/10
+          {% elif c.kind == 'ai' %}border-fuchsia-500/40 text-fuchsia-200 bg-fuchsia-500/10
+          {% else %}border-amber-500/40 text-amber-200 bg-amber-500/10{% endif %}">
+          {{ c.name }}
+        </span>
+        {% if not loop.last %}<span class="text-slate-600">→</span>{% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </li>
+  {% endfor %}
+</ol>
+
+<div class="mt-10 text-xs text-slate-500 flex flex-wrap gap-4">
+  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-slate-700"></span> client</span>
+  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-cyan-500/40"></span> app</span>
+  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-emerald-500/40"></span> storage</span>
+  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-rose-500/40"></span> cache</span>
+  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-fuchsia-500/40"></span> AI</span>
+  <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-amber-500/40"></span> external</span>
+</div>
+{% endblock %}
