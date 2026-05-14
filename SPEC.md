@@ -42,7 +42,7 @@ The current branch state: `main` and `topic-3` both point at the Topic 3 build.
 
 | # | Command | Concept slide title suggestion |
 |---|---------|---------------------------------|
-| 1 | `docker pull yanivomcstore:1.0` | "Pulling images — layers and tags" |
+| 1 | `docker pull yanivomc/store:1.0` | "Pulling images — layers and tags" |
 | 2 | `docker run -d -p 5000:5000 --name store yanivomc/store:1.0` | "Running a container — detached, ports, names" |
 | 3 | `docker ps` + browse `http://EC2_IP:5000` | "Verifying it runs" |
 | 4 | `docker logs -f store` | "Live logs — Flask request stream" |
