@@ -7,7 +7,7 @@ from flask import Flask, abort, jsonify, render_template, request
 
 app = Flask(__name__)
 VERSION = "1.0"
-CURRENT_TOPIC = 3
+CURRENT_TOPIC = 4
 
 ARCHITECTURE_STAGES = [
     {

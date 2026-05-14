@@ -1,0 +1,20 @@
+# Stage 1 — Naive: just make it work.
+#
+# Problems we will fix later:
+#   - Full python:3.12 base (~1 GB) instead of slim.
+#   - Single COPY busts the pip-install cache on any code change.
+#   - pip cache left inside the image (no --no-cache-dir).
+#   - Runs as root.
+#   - No healthcheck.
+
+FROM python:3.12
+
+WORKDIR /app
+
+COPY . .
+
+RUN pip install -r requirements.txt
+
+EXPOSE 5000
+
+CMD ["python", "app.py"]

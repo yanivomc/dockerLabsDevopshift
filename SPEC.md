@@ -20,7 +20,7 @@ A small e-commerce-style app (the "DevopShift Store") that students operate from
 | Topic | Title | What changes architecturally | Built? |
 |-------|-------|-------------------------------|--------|
 | 3 | Monolith | One pre-built container, static JSON | ✅ Yes |
-| 4 | Build it yourself | Same architecture; student writes the Dockerfile | Code reused from T3 |
+| 4 | Build it yourself | Same architecture; student writes Dockerfile, 3-stage progression | ✅ Yes |
 | 5 | Persistence | + SQLite on a named volume (cart survives restarts) | Planned |
 | 6 | Sidecar | + Redis on a user-defined network (cache `/products`) | Planned |
 | 7 | Publish | + Push to Docker Hub + GHCR | Planned |
@@ -184,10 +184,19 @@ docker container prune
 - Architecture diagram: `Browser → Flask + products.json`
 - Pedagogical payoff: containers run; views counter resets on restart (sets up T5).
 
-### Topic 4 — Build it yourself *(planned, same code)*
-- Students write a Dockerfile from scratch (existing one becomes reference).
-- Diagram unchanged. Payoff: "you can produce the same image you pulled in T3."
-- Likely slide arc: layers, `COPY`, `RUN`, `CMD`, `.dockerignore`, image size.
+### Topic 4 — Build it yourself *(built)*
+- Same app, no Dockerfile in the repo — students write one across three stages.
+- Diagram unchanged: `Browser → Flask + products.json`.
+- **Three-stage progression** (one Dockerfile per stage, each in `solutions/` as reference):
+  1. **Naive** — `python:3.12`, `COPY . .`, single `pip install`. Builds and runs, ~1 GB.
+  2. **Cached** — `python:3.12-slim`, `requirements.txt` copied first, `--no-cache-dir`, explicit copies. ~150 MB; code edits don't bust the pip layer.
+  3. **Secure** — adds non-root `app` user (`useradd` + `USER`) and a `HEALTHCHECK` against `/health` using `urllib` (no `curl` in slim).
+- Suggested slide arc per stage: build, run, inspect (`docker images`, `docker inspect`, `docker ps` STATUS), then a discussion prompt — e.g. "why does running as non-root matter?"
+- Pedagogical payoff: by the end, students have produced the same image they pulled in Topic 3, plus understand *why* the production image looks the way it does (slim, cached, hardened).
+- Talking points for slides:
+  - "Same code as Topic 3 — the difference today is the Dockerfile."
+  - "Touch `app.py`, rebuild. In stage 1, pip re-runs. In stage 2, it doesn't. That's the cache."
+  - "`docker ps` STATUS shows `(healthy)` once the HEALTHCHECK kicks in — proof the container can self-report."
 
 ### Topic 5 — Persistence *(planned)*
 - Add SQLite, expose `/cart` endpoint, mount a named volume at `/data`.
@@ -234,14 +243,16 @@ docker container prune
 
 ## 10. File map (for slides showing the codebase)
 
+**Topic 4 branch** (current `main`):
+
 ```
 .
-├── app.py                  # Flask routes, ARCHITECTURE_STAGES, CURRENT_TOPIC
+├── app.py                  # Flask routes, ARCHITECTURE_STAGES, CURRENT_TOPIC=4
 ├── products.json           # 6 products with specs
 ├── requirements.txt        # flask==3.0.3
-├── Dockerfile              # python:3.12-slim, copy, EXPOSE 5000
 ├── .dockerignore
 ├── .gitignore
+├── LAB.md                  # Topic 4 student instructions
 ├── templates/
 │   ├── base.html           # shared chrome + architecture badge
 │   ├── index.html          # storefront + category filter
@@ -249,5 +260,13 @@ docker container prune
 │   ├── architecture.html   # course timeline
 │   ├── 404.html
 │   └── _macros.html        # inline SVG product icons
+├── solutions/              # reference Dockerfiles (peek if stuck)
+│   ├── README.md
+│   ├── Dockerfile.naive
+│   ├── Dockerfile.cached
+│   └── Dockerfile.secure
+├── SPEC.md                 # this file
 └── CLAUDE.md               # original course-author spec (T3 focused)
 ```
+
+**Topic 3 branch differs:** has a root `Dockerfile` (the image we built and pushed to Docker Hub) and no `LAB.md` / `solutions/`.
