@@ -1,13 +1,15 @@
 import json
 import os
 import socket
-from collections import Counter
+import sqlite3
+from contextlib import contextmanager
 
-from flask import Flask, abort, jsonify, render_template, request
+from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
 
 app = Flask(__name__)
 VERSION = "1.0"
-CURRENT_TOPIC = 4
+CURRENT_TOPIC = 5
+DB_PATH = os.environ.get("DB_PATH", "/data/store.db")
 
 ARCHITECTURE_STAGES = [
     {
@@ -102,8 +104,106 @@ def _load_products():
 PRODUCTS = _load_products()
 PRODUCTS_BY_ID = {p["id"]: p for p in PRODUCTS}
 CATEGORIES = sorted({p["category"] for p in PRODUCTS})
-views = Counter()
 
+# --- SQLite storage ---------------------------------------------------------
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS cart_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  added_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS page_views (
+  path TEXT PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+@contextmanager
+def db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def init_db():
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+    with db() as conn:
+        conn.executescript(SCHEMA)
+
+
+def record_view(path):
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO page_views(path, count) VALUES (?, 1) "
+            "ON CONFLICT(path) DO UPDATE SET count = count + 1",
+            (path,),
+        )
+
+
+def get_views():
+    with db() as conn:
+        return {r["path"]: r["count"] for r in conn.execute("SELECT path, count FROM page_views")}
+
+
+def get_views_total():
+    with db() as conn:
+        row = conn.execute("SELECT COALESCE(SUM(count), 0) AS total FROM page_views").fetchone()
+        return row["total"]
+
+
+def add_to_cart(product_id, quantity=1):
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO cart_items(product_id, quantity) VALUES (?, ?)",
+            (product_id, quantity),
+        )
+
+
+def get_cart_rows():
+    with db() as conn:
+        return [
+            dict(r)
+            for r in conn.execute(
+                "SELECT product_id, SUM(quantity) AS quantity "
+                "FROM cart_items GROUP BY product_id "
+                "ORDER BY MIN(added_at) DESC"
+            )
+        ]
+
+
+def get_cart_count():
+    with db() as conn:
+        row = conn.execute("SELECT COALESCE(SUM(quantity), 0) AS total FROM cart_items").fetchone()
+        return row["total"]
+
+
+def clear_cart():
+    with db() as conn:
+        conn.execute("DELETE FROM cart_items")
+
+
+def _decorate_cart(rows):
+    items = []
+    total = 0
+    for r in rows:
+        p = PRODUCTS_BY_ID.get(r["product_id"])
+        if not p:
+            continue
+        line = p["price"] * r["quantity"]
+        total += line
+        items.append({"product": p, "quantity": r["quantity"], "line_total": line})
+    return items, total
+
+
+# --- Flask routes -----------------------------------------------------------
 
 def _filter_by_category(category):
     return [p for p in PRODUCTS if p["category"] == category] if category else PRODUCTS
@@ -117,13 +217,14 @@ def inject_globals():
         "current_stage": current_stage,
         "hostname": socket.gethostname(),
         "version": VERSION,
-        "views_total": sum(views.values()),
+        "views_total": get_views_total(),
+        "cart_count": get_cart_count(),
     }
 
 
 @app.route("/")
 def index():
-    views["home"] += 1
+    record_view("home")
     category = request.args.get("category")
     return render_template(
         "index.html",
@@ -135,7 +236,7 @@ def index():
 
 @app.route("/product/<int:product_id>")
 def product_detail(product_id):
-    views["product"] += 1
+    record_view("product")
     product = PRODUCTS_BY_ID.get(product_id)
     if not product:
         abort(404)
@@ -144,8 +245,29 @@ def product_detail(product_id):
 
 @app.route("/architecture")
 def architecture():
-    views["architecture"] += 1
+    record_view("architecture")
     return render_template("architecture.html", stages=ARCHITECTURE_STAGES)
+
+
+@app.route("/cart")
+def cart():
+    record_view("cart")
+    items, total = _decorate_cart(get_cart_rows())
+    return render_template("cart.html", items=items, total=total)
+
+
+@app.route("/cart/add/<int:product_id>", methods=["POST"])
+def cart_add(product_id):
+    if product_id not in PRODUCTS_BY_ID:
+        abort(404)
+    add_to_cart(product_id)
+    return redirect(request.referrer or url_for("cart"))
+
+
+@app.route("/cart/clear", methods=["POST"])
+def cart_clear():
+    clear_cart()
+    return redirect(url_for("cart"))
 
 
 @app.route("/products")
@@ -173,13 +295,18 @@ def info():
         version=VERSION,
         env=os.environ.get("APP_ENV", "dev"),
         topic=CURRENT_TOPIC,
-        views=dict(views),
+        db_path=DB_PATH,
+        views=get_views(),
+        cart_count=get_cart_count(),
     )
 
 
 @app.errorhandler(404)
 def not_found(_):
     return render_template("404.html"), 404
+
+
+init_db()
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ A small e-commerce-style app (the "DevopShift Store") that students operate from
 |-------|-------|-------------------------------|--------|
 | 3 | Monolith | One pre-built container, static JSON | ✅ Yes |
 | 4 | Build it yourself | Same architecture; student writes Dockerfile, 3-stage progression | ✅ Yes |
-| 5 | Persistence | + SQLite on a named volume (cart survives restarts) | Planned |
+| 5 | Persistence | + SQLite on a named volume; cart finally works, walkthrough + bind-mount challenge | ✅ Yes |
 | 6 | Sidecar | + Redis on a user-defined network (cache `/products`) | Planned |
 | 7 | Publish | + Push to Docker Hub + GHCR | Planned |
 | P2.1 | Slim down | Multi-stage build to shrink image | Planned |
@@ -198,10 +198,23 @@ docker container prune
   - "Touch `app.py`, rebuild. In stage 1, pip re-runs. In stage 2, it doesn't. That's the cache."
   - "`docker ps` STATUS shows `(healthy)` once the HEALTHCHECK kicks in — proof the container can self-report."
 
-### Topic 5 — Persistence *(planned)*
-- Add SQLite, expose `/cart` endpoint, mount a named volume at `/data`.
-- Diagram adds: `SQLite (volume)`.
-- Payoff: views counter / cart survives `docker rm` + `docker run` because the volume persists.
+### Topic 5 — Persistence *(built)*
+- App now has a real `/cart` (HTML at `/cart`, JSON cart count in `/info`). The disabled "Add to cart" button from earlier topics is enabled.
+- SQLite at `/data/store.db` stores **both** the cart and the views counter. `DB_PATH` env var overrides the default.
+- Dockerfile declares `VOLUME /data` and `mkdir -p /data` + `chown` so the non-root `app` user can write.
+- **Lab shape** — walkthrough → break it → fix it → fix-it-yourself:
+  1. Build & run without `-v` — add to cart — `docker rm -f` — run fresh — cart is empty. The pain.
+  2. `docker volume create store-data` + `-v store-data:/data` — repeat the rm/run dance — cart persists.
+  3. `docker volume ls` / `docker volume inspect` — point at the Mountpoint as proof.
+  4. Brief bind-mount contrast (`-v $(pwd)/dev-data:/data`) — same data, now visible on the host.
+- **Fix-it-yourself challenges** (`solutions/CHALLENGE.md`):
+  - **A:** wire up the bind mount themselves, prove `./dev-data/store.db` exists, peek with `sqlite3`.
+  - **B (stretch):** two containers sharing the same named volume on different ports — demonstrate the cart appearing in both, then surface `database is locked` under concurrent writes (sets up the MySQL move in P2.2).
+- Talking points for slides:
+  - "The button you've been clicking on since Topic 3 finally works."
+  - "Same image, same code — the difference is one `-v` flag."
+  - "Named volumes hide the data. Bind mounts expose it. Pick based on whether you're running in production or on your laptop."
+  - "Concurrent SQLite writers hit lock errors. That's why P2.2 swaps to MySQL — same volume lesson, different database."
 
 ### Topic 6 — Sidecar *(planned)*
 - Add a Redis container, user-defined bridge network, cache `/products` reads.
@@ -243,30 +256,31 @@ docker container prune
 
 ## 10. File map (for slides showing the codebase)
 
-**Topic 4 branch** (current `main`):
+**Topic 5 branch** (current `main`):
 
 ```
 .
-├── app.py                  # Flask routes, ARCHITECTURE_STAGES, CURRENT_TOPIC=4
+├── app.py                  # Flask routes + SQLite layer, CURRENT_TOPIC=5
 ├── products.json           # 6 products with specs
 ├── requirements.txt        # flask==3.0.3
+├── Dockerfile              # python:3.12-slim, non-root, VOLUME /data, HEALTHCHECK
 ├── .dockerignore
 ├── .gitignore
-├── LAB.md                  # Topic 4 student instructions
+├── LAB.md                  # Topic 5 walkthrough + challenges
 ├── templates/
-│   ├── base.html           # shared chrome + architecture badge
+│   ├── base.html           # adds Cart nav, "Views (persisted)" footer
 │   ├── index.html          # storefront + category filter
-│   ├── product.html        # detail page + specs + disabled cart
+│   ├── product.html        # detail page + enabled Add-to-cart form
+│   ├── cart.html           # NEW — cart with line totals + clear button
 │   ├── architecture.html   # course timeline
 │   ├── 404.html
 │   └── _macros.html        # inline SVG product icons
-├── solutions/              # reference Dockerfiles (peek if stuck)
-│   ├── README.md
-│   ├── Dockerfile.naive
-│   ├── Dockerfile.cached
-│   └── Dockerfile.secure
+├── solutions/
+│   └── CHALLENGE.md        # bind mount + two-container challenge answers
 ├── SPEC.md                 # this file
 └── CLAUDE.md               # original course-author spec (T3 focused)
 ```
 
-**Topic 3 branch differs:** has a root `Dockerfile` (the image we built and pushed to Docker Hub) and no `LAB.md` / `solutions/`.
+**How earlier branches differ:**
+- **`topic-3`**: has `Dockerfile`, no `LAB.md` / `solutions/` / `cart.html`, app.py has the in-memory `Counter`, "Add to cart" button is disabled.
+- **`topic-4`**: no root `Dockerfile` (students write it), `solutions/` holds three reference Dockerfiles (`naive`, `cached`, `secure`) instead of `CHALLENGE.md`, app.py same in-memory Counter as topic-3.

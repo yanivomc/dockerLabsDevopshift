@@ -1,26 +1,19 @@
-# Stage 3 — Secure: non-root user + container healthcheck.
-#
-# What changed vs cached:
-#   - Created an unprivileged user `app` and switched to it with USER.
-#   - HEALTHCHECK hits /health every 30 s; container is marked unhealthy
-#     after 3 failures. Uses urllib so we don't pull curl into the image.
-
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Dependencies first — cache-friendly.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application code.
 COPY app.py products.json ./
 COPY templates ./templates
 
-# Unprivileged user. /app handed over so Flask can read its files.
 RUN useradd --create-home --shell /bin/bash --uid 1000 app \
- && chown -R app:app /app
+ && mkdir -p /data \
+ && chown -R app:app /app /data
 USER app
+
+VOLUME /data
 
 EXPOSE 5000
 
