@@ -201,8 +201,9 @@ docker container prune
 ### Topic 5 — Persistence *(built)*
 - App now has a real `/cart` (HTML at `/cart`, JSON cart count in `/info`). The disabled "Add to cart" button from earlier topics is enabled.
 - SQLite at `/data/store.db` stores **both** the cart and the views counter. `DB_PATH` env var overrides the default.
-- Dockerfile declares `VOLUME /data` and `mkdir -p /data` + `chown` so the non-root `app` user can write.
-- **Lab shape** — walkthrough → break it → fix it → fix-it-yourself:
+- **No Dockerfile shipped at root** — students evolve their Topic 4 "secure" Dockerfile. The reference answer lives at `solutions/Dockerfile.with-volume` (adds `mkdir -p /data`, `chown app:app /data`, and a `VOLUME /data` declaration).
+- **Setup mini-task** before the walkthrough: students add the three Dockerfile lines themselves, *then* build. Reinforces Topic 4 and motivates `VOLUME` as the explicit "this path is for persistent data" declaration.
+- **Lab shape** — setup → walkthrough → break it → fix it → fix-it-yourself:
   1. Build & run without `-v` — add to cart — `docker rm -f` — run fresh — cart is empty. The pain.
   2. `docker volume create store-data` + `-v store-data:/data` — repeat the rm/run dance — cart persists.
   3. `docker volume ls` / `docker volume inspect` — point at the Mountpoint as proof.
@@ -263,10 +264,9 @@ docker container prune
 ├── app.py                  # Flask routes + SQLite layer, CURRENT_TOPIC=5
 ├── products.json           # 6 products with specs
 ├── requirements.txt        # flask==3.0.3
-├── Dockerfile              # python:3.12-slim, non-root, VOLUME /data, HEALTHCHECK
 ├── .dockerignore
 ├── .gitignore
-├── LAB.md                  # Topic 5 walkthrough + challenges
+├── LAB.md                  # Topic 5 setup + walkthrough + challenges
 ├── templates/
 │   ├── base.html           # adds Cart nav, "Views (persisted)" footer
 │   ├── index.html          # storefront + category filter
@@ -276,11 +276,15 @@ docker container prune
 │   ├── 404.html
 │   └── _macros.html        # inline SVG product icons
 ├── solutions/
-│   └── CHALLENGE.md        # bind mount + two-container challenge answers
+│   ├── README.md
+│   ├── Dockerfile.with-volume  # evolved Topic 4 Dockerfile (setup-task answer)
+│   └── CHALLENGE.md            # bind mount + two-container challenge answers
 ├── SPEC.md                 # this file
 └── CLAUDE.md               # original course-author spec (T3 focused)
 ```
 
+**Topic 5 has no root `Dockerfile`** — students evolve their Topic 4 Dockerfile and `docker build -t store:topic5 .` in their working tree. The reference answer lives in `solutions/`.
+
 **How earlier branches differ:**
-- **`topic-3`**: has `Dockerfile`, no `LAB.md` / `solutions/` / `cart.html`, app.py has the in-memory `Counter`, "Add to cart" button is disabled.
-- **`topic-4`**: no root `Dockerfile` (students write it), `solutions/` holds three reference Dockerfiles (`naive`, `cached`, `secure`) instead of `CHALLENGE.md`, app.py same in-memory Counter as topic-3.
+- **`topic-3`**: has root `Dockerfile`, no `LAB.md` / `solutions/` / `cart.html`, app.py has the in-memory `Counter`, "Add to cart" button is disabled.
+- **`topic-4`**: no root `Dockerfile` either (students write it for the first time), `solutions/` holds three reference Dockerfiles (`naive`, `cached`, `secure`) instead of `Dockerfile.with-volume` + `CHALLENGE.md`. app.py has the same in-memory `Counter` as topic-3.

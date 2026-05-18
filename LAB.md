@@ -2,9 +2,32 @@
 
 You can run a container (Topic 3) and build one (Topic 4). Today: make the data survive when the container does not.
 
-This branch ships with a working `Dockerfile` and a real `/cart` page — the disabled button from Topic 3 is finally enabled. The app stores its data in SQLite at `/data/store.db` *inside* the container.
+This branch ships with a real `/cart` page — the disabled button from Topic 3 is finally enabled. The app stores its data in SQLite at `/data/store.db` *inside* the container. There is **no Dockerfile in the repo today** — you're going to evolve the one you wrote in Topic 4.
 
 The lesson is about *behaviour*: why data dies, and how volumes fix it.
+
+---
+
+## Setup — Evolve your Topic 4 Dockerfile
+
+Start from the **secure** Dockerfile you wrote in Topic 4 (non-root `app` user, healthcheck). It runs the app fine, but it has no idea about persistent data. You'll add three things:
+
+1. **Create the data directory** — add `mkdir -p /data` to your existing `RUN useradd ...` line.
+2. **Hand it to the `app` user** — extend the `chown` so `/data` is owned by `app:app`, not root.
+3. **Declare the volume** — add `VOLUME /data` after the `USER app` line.
+
+> **Why each line:**
+> - Without the directory, SQLite cannot create the DB file (`unable to open database file`).
+> - Without the `chown`, the non-root `app` user cannot write to it (permission denied).
+> - `VOLUME /data` is metadata that tells Docker "this path is for persistent data" — and if a student forgets `-v`, Docker creates an anonymous volume so writes don't go into the container's ephemeral layer.
+
+Then build:
+
+```bash
+docker build -t store:topic5 .
+```
+
+> **Stuck?** [`solutions/Dockerfile.with-volume`](solutions/Dockerfile.with-volume) shows the reference answer. Compare only after you have something that builds.
 
 ---
 
@@ -13,7 +36,6 @@ The lesson is about *behaviour*: why data dies, and how volumes fix it.
 ### Step 1 — Run without a volume. Feel the pain.
 
 ```bash
-docker build -t store:topic5 .
 docker run -d -p 5000:5000 --name store store:topic5
 ```
 
@@ -37,6 +59,8 @@ docker rm -f store
 docker volume create store-data
 docker run -d -p 5000:5000 --name store -v store-data:/data store:topic5
 ```
+
+> **Implicit vs explicit:** `docker volume create` is optional here — Docker would auto-create `store-data` on first `-v` use anyway. We do it explicitly so the volume is a thing you *see and manage* (`docker volume ls`) before you mount it. Same lesson applies to networks in Topic 6.
 
 Add items again. Then:
 
