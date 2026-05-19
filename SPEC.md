@@ -22,7 +22,7 @@ A small e-commerce-style app (the "DevopShift Store") that students operate from
 | 3 | Monolith | One pre-built container, static JSON | ✅ Yes |
 | 4 | Build it yourself | Same architecture; student writes Dockerfile, 3-stage progression | ✅ Yes |
 | 5 | Persistence | + SQLite on a named volume; cart finally works, walkthrough + bind-mount challenge | ✅ Yes |
-| 6 | Sidecar | + Redis on a user-defined network (cache `/products`) | Planned |
+| 6 | Sidecar | + Redis on a user-defined network; cache-aside `/products`, default-bridge vs user-defined-network demo | ✅ Yes |
 | 7 | Publish | + Push to Docker Hub + GHCR | Planned |
 | P2.1 | Slim down | Multi-stage build to shrink image | Planned |
 | P2.2 | Compose stack | Flask + MySQL + Redis + Ollama (`/recommend`) | Planned |
@@ -217,10 +217,23 @@ docker container prune
   - "Named volumes hide the data. Bind mounts expose it. Pick based on whether you're running in production or on your laptop."
   - "Concurrent SQLite writers hit lock errors. That's why P2.2 swaps to MySQL — same volume lesson, different database."
 
-### Topic 6 — Sidecar *(planned)*
-- Add a Redis container, user-defined bridge network, cache `/products` reads.
-- Diagram adds: `Redis (sidecar)`.
-- Payoff: two containers talk by name, not IP.
+### Topic 6 — Sidecar *(built)*
+- Adds the `redis` Python client (only change to `requirements.txt`), a cache-aside layer over `/products` (30 s TTL, JSON-encoded payload), a new HTML-free `/cache` endpoint exposing `{connected, redis_host, hits, misses, ratio, ttl_remaining}`, and a small footer pill that flips green when the cache is up.
+- Hits and misses are stored in Redis itself (`cache:hits`, `cache:misses`) so multiple Flask containers share one set of counters — same Redis = same state.
+- Cache fails closed: when Redis is unreachable, `/products` falls through to the in-memory list. The app stays up; the footer just shows `Cache: ✗ disconnected`. Real-world resilience pattern, named explicitly in the LAB.
+- **Lab shape** — setup (rebuild) → walkthrough → break it → fix it → fix-it-yourself:
+  1. Run Flask alone with `-v` for the volume from Topic 5. `/cache` shows disconnected.
+  2. Start `redis:7-alpine`, no network flag. `docker exec store getent hosts redis` returns *nothing* — Docker's **default bridge** has no automatic DNS for container names. The two containers can ping by IP, but IPs change.
+  3. `docker network create store-net`, re-run both containers with `--network store-net`. `getent` now resolves, footer flips to **`Cache: ✓`**, hit ratio climbs as you refresh `/products`.
+  4. `docker network inspect store-net` — point at the embedded DNS.
+- **Fix-it-yourself challenges** (`solutions/CHALLENGE.md`):
+  - **A:** run a one-shot `redis-cli` container on `store-net`, `KEYS *`, `FLUSHALL`, watch `/cache` reset. Demonstrates that DNS is a network property, not a Flask property.
+  - **B (stretch):** two `store` containers on different ports sharing the same Redis (and the same volume). Both see the same cart **and** the same cache stats — sets up "why a database server beats a database file" right before the MySQL move in P2.2.
+- Talking points for slides:
+  - "Default bridge: containers can ping by IP. User-defined network: containers can ping by name."
+  - "`docker volume` auto-creates, `docker network` does not — that's intentional. Networks are a contract."
+  - "The footer changed from a red ✗ to a green ✓ because of *one* `docker run` flag: `--network store-net`."
+  - "Two Flask containers, one Redis. Same hit counters in both — that's what 'shared state' actually means."
 
 ### Topic 7 — Publish *(planned)*
 - Tag and push the image to Docker Hub and GHCR.
@@ -257,34 +270,35 @@ docker container prune
 
 ## 10. File map (for slides showing the codebase)
 
-**Topic 5 branch** (current `main`):
+**Topic 6 branch** (current `main`):
 
 ```
 .
-├── app.py                  # Flask routes + SQLite layer, CURRENT_TOPIC=5
+├── app.py                  # Flask + SQLite + Redis cache-aside, CURRENT_TOPIC=6
 ├── products.json           # 6 products with specs
-├── requirements.txt        # flask==3.0.3
+├── requirements.txt        # flask==3.0.3, redis==5.0.4
+├── Dockerfile              # same as topic-5 with-volume; only requirements.txt changed
 ├── .dockerignore
 ├── .gitignore
-├── LAB.md                  # Topic 5 setup + walkthrough + challenges
+├── LAB.md                  # Topic 6 setup + walkthrough + challenges
 ├── templates/
-│   ├── base.html           # adds Cart nav, "Views (persisted)" footer
+│   ├── base.html           # footer adds Cache pill (✓/✗ + hit-ratio %)
 │   ├── index.html          # storefront + category filter
 │   ├── product.html        # detail page + enabled Add-to-cart form
-│   ├── cart.html           # NEW — cart with line totals + clear button
+│   ├── cart.html           # cart with line totals + clear button
 │   ├── architecture.html   # course timeline
 │   ├── 404.html
 │   └── _macros.html        # inline SVG product icons
 ├── solutions/
 │   ├── README.md
-│   ├── Dockerfile.with-volume  # evolved Topic 4 Dockerfile (setup-task answer)
-│   └── CHALLENGE.md            # bind mount + two-container challenge answers
+│   └── CHALLENGE.md        # redis-cli + two-Flask challenges
 ├── SPEC.md                 # this file
 └── CLAUDE.md               # original course-author spec (T3 focused)
 ```
 
-**Topic 5 has no root `Dockerfile`** — students evolve their Topic 4 Dockerfile and `docker build -t store:topic5 .` in their working tree. The reference answer lives in `solutions/`.
+**Topic 6 ships with the root `Dockerfile`** because the lab is about *runtime* (networks), not about evolving the Dockerfile — only `requirements.txt` changes. Build once, then spend the lab on `docker network` + `docker run --network`.
 
 **How earlier branches differ:**
-- **`topic-3`**: has root `Dockerfile`, no `LAB.md` / `solutions/` / `cart.html`, app.py has the in-memory `Counter`, "Add to cart" button is disabled.
-- **`topic-4`**: no root `Dockerfile` either (students write it for the first time), `solutions/` holds three reference Dockerfiles (`naive`, `cached`, `secure`) instead of `Dockerfile.with-volume` + `CHALLENGE.md`. app.py has the same in-memory `Counter` as topic-3.
+- **`topic-3`**: has root `Dockerfile`, no `LAB.md` / `solutions/` / `cart.html`, app.py has the in-memory `Counter` and no Redis, "Add to cart" button is disabled.
+- **`topic-4`**: no root `Dockerfile` (students write it), `solutions/Dockerfile.{naive,cached,secure}` instead of the Topic 6 `CHALLENGE.md`, no SQLite or Redis in app.py.
+- **`topic-5`**: no root `Dockerfile` (students evolve their Topic 4 one), `solutions/Dockerfile.with-volume` is the reference. App has SQLite but no Redis; footer shows "Views (persisted)" but no Cache pill.

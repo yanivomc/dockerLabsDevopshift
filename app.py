@@ -4,12 +4,20 @@ import socket
 import sqlite3
 from contextlib import contextmanager
 
+import redis as redis_lib
 from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
 
 app = Flask(__name__)
 VERSION = "1.0"
-CURRENT_TOPIC = 5
+CURRENT_TOPIC = 6
 DB_PATH = os.environ.get("DB_PATH", "/data/store.db")
+REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
+CACHE_TTL_SECONDS = 30
+
+CACHE_KEY_PRODUCTS = "products:all"
+CACHE_KEY_HITS = "cache:hits"
+CACHE_KEY_MISSES = "cache:misses"
 
 ARCHITECTURE_STAGES = [
     {
@@ -104,6 +112,7 @@ def _load_products():
 PRODUCTS = _load_products()
 PRODUCTS_BY_ID = {p["id"]: p for p in PRODUCTS}
 CATEGORIES = sorted({p["category"] for p in PRODUCTS})
+
 
 # --- SQLite storage ---------------------------------------------------------
 
@@ -203,6 +212,70 @@ def _decorate_cart(rows):
     return items, total
 
 
+# --- Redis cache ------------------------------------------------------------
+
+_redis_client = None
+
+
+def get_redis():
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis_lib.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            socket_connect_timeout=0.5,
+            socket_timeout=0.5,
+        )
+    return _redis_client
+
+
+def get_cached_products(category=None):
+    """Cache-aside read for /products. Falls through to PRODUCTS if Redis is down."""
+    base = _filter_by_category(category)
+    try:
+        r = get_redis()
+        raw = r.get(CACHE_KEY_PRODUCTS)
+        if raw is not None:
+            r.incr(CACHE_KEY_HITS)
+            cached = json.loads(raw)
+            return [p for p in cached if not category or p["category"] == category]
+        r.incr(CACHE_KEY_MISSES)
+        r.setex(CACHE_KEY_PRODUCTS, CACHE_TTL_SECONDS, json.dumps(PRODUCTS))
+    except redis_lib.RedisError:
+        pass
+    return base
+
+
+def cache_stats():
+    try:
+        r = get_redis()
+        hits = int(r.get(CACHE_KEY_HITS) or 0)
+        misses = int(r.get(CACHE_KEY_MISSES) or 0)
+        ttl = r.ttl(CACHE_KEY_PRODUCTS)
+        total = hits + misses
+        return {
+            "connected": True,
+            "redis_host": REDIS_HOST,
+            "redis_port": REDIS_PORT,
+            "hits": hits,
+            "misses": misses,
+            "ratio": round(hits / total, 3) if total else 0,
+            "ttl_remaining": ttl if ttl and ttl > 0 else None,
+            "ttl_seconds": CACHE_TTL_SECONDS,
+        }
+    except redis_lib.RedisError:
+        return {
+            "connected": False,
+            "redis_host": REDIS_HOST,
+            "redis_port": REDIS_PORT,
+            "hits": 0,
+            "misses": 0,
+            "ratio": 0,
+            "ttl_remaining": None,
+            "ttl_seconds": CACHE_TTL_SECONDS,
+        }
+
+
 # --- Flask routes -----------------------------------------------------------
 
 def _filter_by_category(category):
@@ -219,6 +292,7 @@ def inject_globals():
         "version": VERSION,
         "views_total": get_views_total(),
         "cart_count": get_cart_count(),
+        "cache": cache_stats(),
     }
 
 
@@ -272,7 +346,7 @@ def cart_clear():
 
 @app.route("/products")
 def products():
-    return jsonify(_filter_by_category(request.args.get("category")))
+    return jsonify(get_cached_products(request.args.get("category")))
 
 
 @app.route("/products/<int:product_id>")
@@ -281,6 +355,11 @@ def product_json(product_id):
     if not product:
         abort(404)
     return jsonify(product)
+
+
+@app.route("/cache")
+def cache():
+    return jsonify(cache_stats())
 
 
 @app.route("/health")
@@ -298,6 +377,7 @@ def info():
         db_path=DB_PATH,
         views=get_views(),
         cart_count=get_cart_count(),
+        cache=cache_stats(),
     )
 
 

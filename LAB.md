@@ -1,107 +1,111 @@
-# Topic 5 — Persistence
+# Topic 6 — Sidecar
 
-You can run a container (Topic 3) and build one (Topic 4). Today: make the data survive when the container does not.
+You can build (Topic 4), run (Topic 3), and persist (Topic 5). Today: **two containers talking to each other**.
 
-This branch ships with a real `/cart` page — the disabled button from Topic 3 is finally enabled. The app stores its data in SQLite at `/data/store.db` *inside* the container. There is **no Dockerfile in the repo today** — you're going to evolve the one you wrote in Topic 4.
+The app now wants to cache `/products` reads through Redis. Redis is its own container. The lesson is *how* they find each other — by name, not by IP — and what you have to set up for that to work.
 
-The lesson is about *behaviour*: why data dies, and how volumes fix it.
+The repo ships with a `Dockerfile` (same shape as Topic 5; the only change today is `redis` in `requirements.txt`) and the app already does cache-aside reads against Redis. You don't have to write any Python.
 
 ---
 
-## Setup — Evolve your Topic 4 Dockerfile
-
-Start from the **secure** Dockerfile you wrote in Topic 4 (non-root `app` user, healthcheck). It runs the app fine, but it has no idea about persistent data. You'll add three things:
-
-1. **Create the data directory** — add `mkdir -p /data` to your existing `RUN useradd ...` line.
-2. **Hand it to the `app` user** — extend the `chown` so `/data` is owned by `app:app`, not root.
-3. **Declare the volume** — add `VOLUME /data` after the `USER app` line.
-
-> **Why each line:**
-> - Without the directory, SQLite cannot create the DB file (`unable to open database file`).
-> - Without the `chown`, the non-root `app` user cannot write to it (permission denied).
-> - `VOLUME /data` is metadata that tells Docker "this path is for persistent data" — and if a student forgets `-v`, Docker creates an anonymous volume so writes don't go into the container's ephemeral layer.
-
-Then build:
+## Setup — Rebuild the image
 
 ```bash
-docker build -t store:topic5 .
+docker build -t store:topic6 .
 ```
 
-> **Stuck?** [`solutions/Dockerfile.with-volume`](solutions/Dockerfile.with-volume) shows the reference answer. Compare only after you have something that builds.
+The rebuild adds the `redis` Python client. Nothing else changed.
 
 ---
 
 ## Walkthrough
 
-### Step 1 — Run without a volume. Feel the pain.
+### Step 1 — Run Flask alone. Watch the cache fail closed.
 
 ```bash
-docker run -d -p 5000:5000 --name store store:topic5
+docker rm -f store 2>/dev/null
+docker volume create store-data 2>/dev/null
+docker run -d -p 5000:5000 --name store -v store-data:/data store:topic6
 ```
 
-Open http://localhost:5000. Add a few items to your cart. Refresh — the count in the nav rises. Visit `/cart` — items are there.
+Open http://localhost:5000/cache:
 
-Now destroy the container and start a fresh one from the same image:
+```json
+{ "connected": false, "redis_host": "redis", ... }
+```
+
+The app is *trying* to reach a host called `redis` that doesn't exist yet. `/products` still works — it falls through to the in-memory data when the cache is unreachable. **Cache-aside is supposed to fail gracefully.** Good design.
+
+Look at the footer of any page: **`Cache: ✗ disconnected`**.
+
+### Step 2 — Start Redis. Try to connect on the default bridge.
 
 ```bash
-docker rm -f store
-docker run -d -p 5000:5000 --name store store:topic5
+docker run -d --name redis redis:7-alpine
 ```
 
-Visit `/cart`. **Empty.**
+`store` and `redis` are now both running, both attached to Docker's **default bridge network**. Reload `/cache`:
 
-> The container's writable layer was destroyed with `docker rm`. The SQLite file lived inside that layer. The data is gone because the storage went with the container.
+```json
+{ "connected": false, ... }
+```
 
-### Step 2 — Add a named volume.
+Still disconnected. Why?
 
 ```bash
-docker rm -f store
-docker volume create store-data
-docker run -d -p 5000:5000 --name store -v store-data:/data store:topic5
+docker exec store getent hosts redis
+# → (no output, exit 2)
+
+docker network inspect bridge --format '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{"\n"}}{{end}}'
+# → store      172.17.0.2/16
+# → redis      172.17.0.3/16
 ```
 
-> **Implicit vs explicit:** `docker volume create` is optional here — Docker would auto-create `store-data` on first `-v` use anyway. We do it explicitly so the volume is a thing you *see and manage* (`docker volume ls`) before you mount it. Same lesson applies to networks in Topic 6.
+Both containers are there. Both have IPs. But `getent hosts redis` returns nothing — **the default bridge has no automatic DNS for container names.** Disabled since Docker 1.10.
 
-Add items again. Then:
+You *could* reach Redis by IP (`172.17.0.3`), but IPs change every time you `docker run`. That's not a stable contract between services.
+
+### Step 3 — Fix it with a user-defined network
 
 ```bash
-docker rm -f store
-docker run -d -p 5000:5000 --name store -v store-data:/data store:topic5
+docker rm -f store redis
+docker network create store-net
 ```
 
-Visit `/cart`. **Your items are still there.** The volume outlived the container.
-
-### Step 3 — Inspect the volume
+> **Implicit vs explicit, again:** Docker doesn't auto-create networks on first use the way it auto-creates volumes — you must run `docker network create` (or use Compose, which calls this for you). Networks are always explicit.
 
 ```bash
-docker volume ls
-docker volume inspect store-data
+docker run -d --name redis --network store-net redis:7-alpine
+docker run -d --name store --network store-net -p 5000:5000 \
+  -v store-data:/data store:topic6
 ```
 
-`Mountpoint` is where Docker stores the volume on the host. On a real engine you cannot read it directly (it lives under Docker's root, owned by root). On macOS / Docker Desktop it lives inside the LinuxKit VM — same idea.
+Reload `/cache`:
 
-### Step 4 — Bind mount as a contrast
+```json
+{ "connected": true, "redis_host": "redis", "hits": 0, "misses": 1, ... }
+```
 
-Named volumes hide the data. A *bind mount* makes the same data visible on your host filesystem — useful for local development and for poking at the DB with tools.
+`misses: 1` because the first `/cache` call populated the products cache. Now refresh `/products` a few times:
+
+```json
+{ "hits": 6, "misses": 1, "ratio": 0.857 }
+```
+
+The hit ratio climbs. The footer flips to **`Cache: ✓ 85%`** in green.
+
+### Step 4 — Inspect the user-defined network
 
 ```bash
-docker rm -f store
-mkdir -p ./dev-data
-docker run -d -p 5000:5000 --name store -v "$(pwd)/dev-data:/data" store:topic5
+docker network inspect store-net --format '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{"\n"}}{{end}}'
+# → store      172.18.0.3/16
+# → redis      172.18.0.2/16
+
+docker exec store getent hosts redis
+# → 172.18.0.2  redis
 ```
 
-After adding items, on your host:
-
-```bash
-ls ./dev-data
-sqlite3 ./dev-data/store.db 'SELECT * FROM cart_items;'   # if you have sqlite3
-```
-
-You can see and edit the file with normal host tools.
-
-> **Named volume vs bind mount — when to use each:**
-> - **Named volume** for *production data*: lifecycle owned by Docker, portable across machines, survives `docker rm`.
-> - **Bind mount** for *development*: you can edit/inspect the data with host tools, but the path is host-specific.
+On a user-defined network, **Docker runs an embedded DNS server** that resolves container names to their current IPs. That's the entire payoff of this lesson.
 
 ---
 
@@ -109,24 +113,28 @@ You can see and edit the file with normal host tools.
 
 Two challenges. Try them before peeking at [solutions/CHALLENGE.md](solutions/CHALLENGE.md).
 
-### Challenge A — Bind mount, end to end
+### Challenge A — Same network, third container
 
-Wire up a fresh container that bind-mounts a directory of your choosing onto `/data`. Confirm by listing the directory on the host and seeing `store.db`. Bonus: open the DB with `sqlite3` and run a `SELECT` against `cart_items`.
+Run a one-shot `redis-cli` container on `store-net`. From it:
+1. List all the cache keys (`KEYS *`).
+2. Read the cached product list (`GET products:all`).
+3. Flush the cache (`FLUSHALL`).
+4. Refresh `/cache` in your browser — verify hits and misses reset to 0 and the next `/products` is a miss.
 
-### Challenge B (stretch) — Two containers, one volume
+You should not need to know any container's IP. Name resolution does all the work.
 
-Two developers want to share the same cart data. Run two containers on different host ports (e.g. `5000` and `5001`), both pointing at the same named volume. Add an item via one container, verify the other one sees it.
+### Challenge B (stretch) — Two store containers, one cache
 
-When it works, also try to make both containers add items at the same time and notice what happens. (Hint: SQLite is single-writer. This is exactly *why* Topic P2.2 swaps to MySQL.)
+Run a second `store` container on the same `store-net` and a different host port (e.g. 5001). Add an item to the cart from one, refresh the other — same items (volume) **and** same cache stats (Redis). Why does this work where two SQLite writers from Topic 5's Challenge B fought each other? (Hint: Redis is a server, not a file.)
 
 ---
 
 ## Cleanup
 
 ```bash
-docker rm -f store store2 2>/dev/null
+docker rm -f store store2 redis 2>/dev/null
+docker network rm store-net
 docker volume rm store-data
-rm -rf ./dev-data
 ```
 
 ---
@@ -135,8 +143,8 @@ rm -rf ./dev-data
 
 | What | Why it lands |
 |------|--------------|
-| The cart works for the first time ever | Pays off the disabled "unlocks in Topic 5" button students saw three labs ago |
-| Footer **"Views (persisted)"** counter | Was "resets on restart" before; the tooltip change literally tells the story |
-| `/cart` page's cyan callout | Tells the student exactly which `docker run` flag is doing the work |
-| `docker volume inspect` Mountpoint | Tangible proof there's *somewhere* on disk holding the bytes |
-| Bind mount + `sqlite3 ./dev-data/store.db` | Lets students see "containerised app, host-visible data" simultaneously |
+| Footer flips `Cache: ✗` → `Cache: ✓ 85%` | Live, visible payoff for one `docker network create` + `--network` |
+| `getent hosts redis` empty on default bridge, populated on user-defined | One-line proof of the DNS difference |
+| `/cache` `hits` and `misses` counters in Redis | Both Flask containers share the same metrics — same Redis = same state |
+| `docker volume` auto-creates, `docker network` does not | Tiny consistency lesson that primes Compose (P2.2) |
+| Cache-aside falls back gracefully when Redis is down | Real-world resilience pattern — slides can name it explicitly |

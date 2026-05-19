@@ -48,6 +48,14 @@
       <span title="Persists across container restarts — backed by SQLite on the /data volume">
         Views (persisted): <code class="text-slate-300">{{ views_total }}</code>
       </span>
+      <a href="/cache" title="Redis cache stats — host: {{ cache.redis_host }}:{{ cache.redis_port }}" class="hover:text-cyan-400 transition">
+        {% if cache.connected %}
+        Cache: <code class="text-emerald-400">✓</code>
+        <code class="text-slate-300">{{ (cache.ratio * 100) | round(0, 'floor') | int }}%</code>
+        {% else %}
+        Cache: <code class="text-rose-400">✗ disconnected</code>
+        {% endif %}
+      </a>
       <span>v{{ version }}</span>
     </div>
   </footer>
