@@ -1,0 +1,12 @@
+{
+  "name": "devopshift-store-css",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Tailwind CSS build for DevopShift Store templates",
+  "scripts": {
+    "build:css": "tailwindcss -i ./src/input.css -o ./static/style.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.4"
+  }
+}

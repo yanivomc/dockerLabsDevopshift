@@ -9,7 +9,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, url
 
 app = Flask(__name__)
 VERSION = "1.0"
-CURRENT_TOPIC = 6
+CURRENT_TOPIC = "P2.1"
 DB_PATH = os.environ.get("DB_PATH", "/data/store.db")
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
@@ -64,28 +64,16 @@ ARCHITECTURE_STAGES = [
         ],
     },
     {
-        "topic": 7,
-        "title": "Publish",
-        "tagline": "Push to a registry",
-        "summary": "Push your image to Docker Hub and GHCR — share what you built.",
+        "topic": "P2.1",
+        "title": "Multi-stage + Bake",
+        "tagline": "Build many, push all",
+        "summary": "Production-shape image (Tailwind build, gunicorn), Docker Bake orchestrates parallel builds and pushes to a registry.",
         "components": [
             {"name": "Browser", "kind": "client"},
-            {"name": "Flask", "kind": "app"},
-            {"name": "Redis", "kind": "cache"},
+            {"name": "Flask (gunicorn, slim)", "kind": "app"},
+            {"name": "Redis (custom image)", "kind": "cache"},
             {"name": "SQLite (volume)", "kind": "storage"},
             {"name": "Registry", "kind": "external"},
-        ],
-    },
-    {
-        "topic": "P2.1",
-        "title": "Slim down",
-        "tagline": "Multi-stage build",
-        "summary": "Shrink the image with a multi-stage Dockerfile.",
-        "components": [
-            {"name": "Browser", "kind": "client"},
-            {"name": "Flask (slim)", "kind": "app"},
-            {"name": "Redis", "kind": "cache"},
-            {"name": "SQLite (volume)", "kind": "storage"},
         ],
     },
     {

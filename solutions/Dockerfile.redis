@@ -1,0 +1,21 @@
+# Custom Redis image for the DevopShift Store — reference answer.
+#
+# Wraps the official redis:7-alpine with:
+#   - curl  — used by the HEALTHCHECK below (alpine doesn't ship it).
+#   - redis.conf — opinionated settings (maxmemory, appendonly) baked in
+#     so the operator does not have to remember to mount it.
+
+FROM redis:7-alpine
+
+RUN apk add --no-cache curl
+
+COPY redis.conf /usr/local/etc/redis/redis.conf
+
+# Talk to Redis through redis-cli for the healthcheck. curl is here because
+# alpine images don't ship it by default and Topic P2.1 demos how to extend
+# an upstream image — once it's installed you can also do `docker exec
+# redis curl ...` to poke other endpoints from inside the cache container.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD redis-cli ping | grep -q PONG || exit 1
+
+CMD ["redis-server", "/usr/local/etc/redis/redis.conf"]

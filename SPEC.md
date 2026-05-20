@@ -23,9 +23,10 @@ A small e-commerce-style app (the "DevopShift Store") that students operate from
 | 4 | Build it yourself | Same architecture; student writes Dockerfile, 3-stage progression | ✅ Yes |
 | 5 | Persistence | + SQLite on a named volume; cart finally works, walkthrough + bind-mount challenge | ✅ Yes |
 | 6 | Sidecar | + Redis on a user-defined network; cache-aside `/products`, default-bridge vs user-defined-network demo | ✅ Yes |
-| 7 | Publish | + Push to Docker Hub + GHCR | Planned |
-| P2.1 | Slim down | Multi-stage build to shrink image | Planned |
+| P2.1 | Multi-stage + Bake | Production-shape image (Tailwind build + gunicorn), Docker Bake orchestrates parallel builds and pushes; absorbs former Topic 7 | ✅ Yes |
 | P2.2 | Compose stack | Flask + MySQL + Redis + Ollama (`/recommend`) | Planned |
+
+> **Topic 7 was folded into P2.1.** Bake's `--push` covers everything Topic 7 would have taught (`docker tag` + `docker push` + multi-registry). The architecture timeline no longer contains a Topic 7 stage.
 
 The current branch state: `main` and `topic-3` both point at the Topic 3 build.
 
@@ -235,14 +236,30 @@ docker container prune
   - "The footer changed from a red ✗ to a green ✓ because of *one* `docker run` flag: `--network store-net`."
   - "Two Flask containers, one Redis. Same hit counters in both — that's what 'shared state' actually means."
 
-### Topic 7 — Publish *(planned)*
-- Tag and push the image to Docker Hub and GHCR.
-- Diagram adds: `Registry` (external).
-- Payoff: someone else can `docker pull` your image, just like they did with `yanivomc/store:1.0` in Topic 3.
-
-### Topic P2.1 — Slim down *(planned)*
-- Multi-stage Dockerfile. Compare image sizes before/after.
-- Diagram unchanged in shape, but the "Flask" pill gets relabeled `Flask (slim)`.
+### Topic P2.1 — Multi-stage + Bake *(built)*
+- **Repo layout changes for the first time**: sub-folders `store/` (Flask context) and `redis/` (custom image context), `docker-bake.hcl` at root, `solutions/` parallels both.
+- **App evolves to production shape**, not just packaging:
+  - Tailwind CDN replaced by a real build step. `store/package.json` ships the Tailwind CLI dep; templates reference `static/style.css`. The CDN `<script>` warning ("not for production") is gone.
+  - `python app.py` (Flask dev server) replaced by `gunicorn -w 4 -b 0.0.0.0:5000 app:app`. `gunicorn` added to `requirements.txt`. The dev-server warning is gone from `docker logs`.
+- **Three-stage Dockerfile** for `store/`:
+  1. `css` — `node:20-alpine`, `npx tailwindcss --minify`. Node toolchain (~100 MB) does not ship.
+  2. `pybuild` — `python:3.12-slim`, `pip install --prefix=/install`. Pip cache + build tooling don't ship.
+  3. runtime — `python:3.12-slim`, `COPY --from=css …`, `COPY --from=pybuild …`, non-root `app` user, `HEALTHCHECK`, `VOLUME /data`, `CMD gunicorn …`.
+- **Custom Redis image** in `redis/`: `FROM redis:7-alpine` + `apk add curl` + `COPY redis.conf` + `HEALTHCHECK redis-cli ping`. The `redis.conf` carries two opinionated lines: `maxmemory 256mb`, `appendonly yes`.
+- **Docker Bake** in `docker-bake.hcl`: two targets (`store-app`, `store-db`), each with `:p2.1` + `:latest` tags and registry-side `cache-from` / `cache-to`. `group "default"` builds both. `docker buildx bake` builds in parallel; `bake --push` publishes — which is what subsumes Topic 7.
+- **Lab shape** — setup → three stages → run-the-stack → stretch:
+  - **Stage 1**: rewrite `store/Dockerfile` as multi-stage (reference: `solutions/Dockerfile.store`).
+  - **Stage 2**: write `redis/Dockerfile` (reference: `solutions/Dockerfile.redis`).
+  - **Stage 3**: fill TODO gaps in `docker-bake.hcl` (reference: `solutions/docker-bake.hcl`).
+  - Run the full stack with the baked images and confirm production fingerprints: styled UI from local build, gunicorn workers in logs, no dev-server warning.
+- **Stretch challenges** (`solutions/CHALLENGE.md`):
+  - **A — Multi-platform** (`linux/amd64,linux/arm64`) via `platforms = [...]` on the target.
+  - **B — Multi-registry** push (Docker Hub + GHCR) by listing additional tags.
+- Talking points for slides:
+  - "The image you ship is what runs. Everything else is build-time scaffolding."
+  - "`docker logs` used to say 'do not use the development server'. Now it says workers started."
+  - "Bake is just a manifest of what to build. `--push` extends it to what to ship."
+  - "Multi-platform images aren't optional anymore — Apple Silicon laptops pulled the rug on x86-only builds."
 
 ### Topic P2.2 — Compose stack *(planned)*
 - Full Compose: Flask + MySQL (replaces SQLite) + Redis + Ollama for `/recommend`.
@@ -270,35 +287,47 @@ docker container prune
 
 ## 10. File map (for slides showing the codebase)
 
-**Topic 6 branch** (current `main`):
+**Topic P2.1 branch** (current `main`) — **first branch with sub-folders**:
 
 ```
 .
-├── app.py                  # Flask + SQLite + Redis cache-aside, CURRENT_TOPIC=6
-├── products.json           # 6 products with specs
-├── requirements.txt        # flask==3.0.3, redis==5.0.4
-├── Dockerfile              # same as topic-5 with-volume; only requirements.txt changed
-├── .dockerignore
-├── .gitignore
-├── LAB.md                  # Topic 6 setup + walkthrough + challenges
-├── templates/
-│   ├── base.html           # footer adds Cache pill (✓/✗ + hit-ratio %)
-│   ├── index.html          # storefront + category filter
-│   ├── product.html        # detail page + enabled Add-to-cart form
-│   ├── cart.html           # cart with line totals + clear button
-│   ├── architecture.html   # course timeline
-│   ├── 404.html
-│   └── _macros.html        # inline SVG product icons
+├── store/                  # Flask app — Bake build context "./store"
+│   ├── app.py              # CURRENT_TOPIC="P2.1", Topic 7 entry removed
+│   ├── products.json
+│   ├── requirements.txt    # adds gunicorn==22.0.0
+│   ├── package.json        # tailwindcss CLI (devDependencies)
+│   ├── tailwind.config.js  # scans templates/**/*.html
+│   ├── src/input.css       # @tailwind base/components/utilities
+│   ├── .dockerignore
+│   ├── templates/
+│   │   ├── base.html       # <link rel="stylesheet" href="/static/style.css">
+│   │   ├── index.html
+│   │   ├── product.html
+│   │   ├── cart.html
+│   │   ├── architecture.html
+│   │   ├── 404.html
+│   │   └── _macros.html
+│   └── Dockerfile          # topic-6 single-stage — students rewrite this
+├── redis/                  # custom Redis image — Bake build context "./redis"
+│   ├── redis.conf          # maxmemory 256mb + appendonly yes
+│   └── (Dockerfile)        # students write this
+├── docker-bake.hcl         # skeleton with TODO gaps
 ├── solutions/
 │   ├── README.md
-│   └── CHALLENGE.md        # redis-cli + two-Flask challenges
+│   ├── Dockerfile.store    # multi-stage reference (Node + pybuild + runtime)
+│   ├── Dockerfile.redis    # custom redis reference
+│   ├── docker-bake.hcl     # filled-in Bake reference
+│   └── CHALLENGE.md        # multi-platform + multi-registry stretches
+├── .gitignore
+├── LAB.md                  # P2.1 setup + 3 stages + run + stretch
 ├── SPEC.md                 # this file
 └── CLAUDE.md               # original course-author spec (T3 focused)
 ```
 
-**Topic 6 ships with the root `Dockerfile`** because the lab is about *runtime* (networks), not about evolving the Dockerfile — only `requirements.txt` changes. Build once, then spend the lab on `docker network` + `docker run --network`.
+**Sub-folders are new in P2.1** — every previous branch was flat at the root. The split is intentional: `docker buildx bake` declares one `context` per target, and each target's context is its own folder.
 
 **How earlier branches differ:**
-- **`topic-3`**: has root `Dockerfile`, no `LAB.md` / `solutions/` / `cart.html`, app.py has the in-memory `Counter` and no Redis, "Add to cart" button is disabled.
-- **`topic-4`**: no root `Dockerfile` (students write it), `solutions/Dockerfile.{naive,cached,secure}` instead of the Topic 6 `CHALLENGE.md`, no SQLite or Redis in app.py.
-- **`topic-5`**: no root `Dockerfile` (students evolve their Topic 4 one), `solutions/Dockerfile.with-volume` is the reference. App has SQLite but no Redis; footer shows "Views (persisted)" but no Cache pill.
+- **`topic-3`**: flat layout, root `Dockerfile`, no `LAB.md` / `solutions/` / `cart.html`, app.py uses in-memory `Counter`, no SQLite, no Redis, "Add to cart" button disabled.
+- **`topic-4`**: flat layout, **no** root `Dockerfile` (students write it), `solutions/Dockerfile.{naive,cached,secure}` reference set. No SQLite or Redis.
+- **`topic-5`**: flat layout, no root `Dockerfile` (students evolve their Topic 4 one), `solutions/Dockerfile.with-volume` reference. App has SQLite but no Redis; footer shows "Views (persisted)" but no Cache pill.
+- **`topic-6`**: flat layout, root `Dockerfile` is back (same shape as topic-5's `with-volume`). App has both SQLite and Redis cache-aside. Footer has the Cache ✓/✗ pill. Templates still use Tailwind CDN, Flask still runs via `python app.py`.

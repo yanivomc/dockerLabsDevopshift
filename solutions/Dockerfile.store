@@ -1,0 +1,57 @@
+# Multi-stage Dockerfile for the DevopShift Store — reference answer.
+#
+# Three stages:
+#   1. css     — Node toolchain builds Tailwind into a tiny static/style.css.
+#                Node itself does not ship to the final image.
+#   2. pybuild — installs Python deps into /install. Build-time only.
+#   3. (final) — python:3.12-slim with just the runtime: site-packages,
+#                compiled CSS, app source, non-root user, healthcheck,
+#                gunicorn as the WSGI server.
+
+# ----------- stage 1: Tailwind build -----------
+FROM node:20-alpine AS css
+
+WORKDIR /css
+COPY package.json tailwind.config.js ./
+COPY src ./src
+COPY templates ./templates
+RUN npm install --no-audit --no-fund \
+ && npx tailwindcss -i ./src/input.css -o ./static/style.css --minify
+
+# ----------- stage 2: Python deps build -----------
+FROM python:3.12-slim AS pybuild
+
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# ----------- stage 3: runtime -----------
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Bring in installed Python packages from the build stage.
+COPY --from=pybuild /install /usr/local
+
+# Bring in the compiled CSS from the Tailwind stage.
+COPY --from=css /css/static/style.css ./static/style.css
+
+# App source.
+COPY app.py products.json ./
+COPY templates ./templates
+
+# Non-root user + writable data dir for SQLite (Topic 5).
+RUN useradd --create-home --shell /bin/bash --uid 1000 app \
+ && mkdir -p /data \
+ && chown -R app:app /app /data
+USER app
+
+VOLUME /data
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD python -c "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health').status == 200 else 1)" || exit 1
+
+# Production WSGI server, not the Flask dev server.
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
